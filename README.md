@@ -1,79 +1,158 @@
 # retryable
-The Retrayable package enables retrying of functions with customizable 
-delay between retries, timeout function to treat as an error, and support 
-forcancelling execution. The package returns stat data, including the 
-error of the function (if any) or nil, the number of retries attempted, 
-and the number of timeouts that occurred.
 
-By default we are going to retry once, but you can change that
+The `retryable` Go package enables retrying of functions with customizable delay between retries, timeouts, and cancellation support. The package returns statistics including the resulting error, the number of retries attempted, and the number of timeouts that occurred.
+
+By default, it executes the function once and does not retry. You can customize this behavior with the fluent API.
 
 ## Features
-* Sleep time between retries
-* Max time function of execution
-* Set the retries number
-* Cacel execution
 
-## Basic example
+* Fluent API for configuration
+* Constant sleep time between retries
+* **New**: Exponential Backoff strategy support
+* Cooperative cancellation support
+* Per-attempt execution timeout
+* 100% backward compatibility for legacy types
+
+---
+
+## Installation
+
+```bash
+go get github.com/lazaroMB/retryable
 ```
+
+---
+
+## Basic Example
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/lazaroMB/retryable"
+)
+
 func DoSomething() error {
-  ..... any action
- }
+	// ... perform action ...
+	return nil
+}
 
- stats := retryable.Retry(DoSomething).Exec()
+func main() {
+	stats := retryable.Retry(DoSomething).Exec()
 
- fmt.Println(stats.Err)
- fmt.Println(stats.Timeout)
- fmt.Println(stats.Retries)
+	fmt.Println("Error:", stats.Err)
+	fmt.Println("Timeouts:", stats.Timeout)
+	fmt.Println("Retries:", stats.Retries)
+}
 ```
 
-## Example with retry
-```
- func DoSomething() error {
-  ..... any action
- }
+---
 
- stats := retryable.Retry(DoSomething)
-  .SetRetries(4) // we execute function 1 time and retry a max of 4 times
-  .Exec()
+## Example with Retries and Delay
 
- fmt.Println(stats.Err)
- fmt.Println(stats.Timeout)
- fmt.Println(stats.Retries)
-```
+```go
+package main
 
-## Example with Sleep and Timeout
-You can use Sleep and Timeout methods in any order
-```
- func PollApi() error {
-  ..... Poll an API and return and error if fails
- }
+import (
+	"fmt"
+	"time"
+	"github.com/lazaroMB/retryable"
+)
 
- stats := retryable.Retry(PollApi)
-   .Sleep(3 * time.Second) // Wait 3 seconds between each retry
-   .Timeout(15 * time.Second) // Each function execution will fail if takes more than 15 seconds then we make a retry or finish
-   .Exec()
+func DoSomething() error {
+	// ... perform action ...
+	return nil
+}
 
- fmt.Println(stats.Err)
- fmt.Println(stats.Timeout)
- fmt.Println(stats.Retries)
+func main() {
+	stats := retryable.Retry(DoSomething).
+		SetRetries(4).                    // Try up to 4 times (1 initial attempt + 3 retries)
+		SetSleep(500 * time.Millisecond). // Wait 500ms between attempts
+		Exec()
+
+	fmt.Println("Error:", stats.Err)
+	fmt.Println("Timeouts:", stats.Timeout)
+	fmt.Println("Retries:", stats.Retries)
+}
 ```
 
-## Full example
-Example with Sleep and Timeout:
+---
+
+## Example with Timeout and Cancellation
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+	"github.com/lazaroMB/retryable"
+)
+
+func PollApi() error {
+	// ... perform network request ...
+	return nil
+}
+
+func main() {
+	rt := retryable.Retry(PollApi).
+		SetTimeout(5 * time.Second).     // Each attempt times out after 5 seconds
+		SetSleep(1 * time.Second).       // Sleep 1 second between attempts
+		SetRetries(10)
+
+	// Cancel execution asynchronously after 10 seconds
+	time.AfterFunc(10 * time.Second, rt.Cancel)
+
+	stats := rt.Exec()
+	fmt.Println("Error:", stats.Err) // Will contain "Function cancelled" if cancelled
+	fmt.Println("Timeouts:", stats.Timeout)
+	fmt.Println("Retries:", stats.Retries)
+}
 ```
- func PollApi() error {
-  ..... Poll an API and return and error if fails
- }
 
- rt := retryable.Retry(PollApi)
-   .Timeout(15 * time.Second)
-   .Sleep(3 * time.Second)
-   .SetRetries(10)
+---
 
- go time.AfterFunc(10 * time.Second, rt.Cancel) // Exec flow cancel fn after 10 seconds
+## Advanced: Exponential Backoff
 
- stats := rt.Exec() 
- fmt.Println(stats.Err) // Cancellation error
- fmt.Println(stats.Timeout)
- fmt.Println(stats.Retries)
+You can configure exponential backoff using the `SetBackoff` method:
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+	"github.com/lazaroMB/retryable"
+)
+
+func PollApi() error {
+	// ... perform network request ...
+	return nil
+}
+
+func main() {
+	backoff := retryable.ExponentialBackoff{
+		Min:    100 * time.Millisecond, // Initial wait time
+		Max:    5 * time.Second,        // Maximum wait time limit
+		Factor: 2.0,                    // Multiplier factor
+	}
+
+	stats := retryable.Retry(PollApi).
+		SetRetries(5).
+		SetBackoff(backoff).
+		Exec()
+
+	fmt.Println("Error:", stats.Err)
+	fmt.Println("Retries:", stats.Retries)
+}
 ```
+
+---
+
+## Backward Compatibility Note
+
+To maintain backward compatibility with previous versions of this library, the typo-containing types are kept as deprecated aliases and can still compile:
+
+* `RetrayableI` is an alias for `Retryable` interface.
+* `Retrayable` is an alias for `Retrier` struct.
